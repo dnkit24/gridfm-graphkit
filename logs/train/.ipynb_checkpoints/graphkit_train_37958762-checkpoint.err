@@ -1,0 +1,22 @@
+2025/07/22 13:28:20 INFO mlflow.tracking.fluent: Experiment with name 'run_1' does not exist. Creating a new experiment.
+Traceback (most recent call last):
+  File "/cluster/home/dnelischer/Untitled/gridfm-graphkit/venv/bin/gridfm_graphkit", line 8, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/cluster/home/dnelischer/Untitled/gridfm-graphkit/gridfm_graphkit/__main__.py", line 54, in main
+    main_standard(args, device)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/cluster/home/dnelischer/Untitled/gridfm-graphkit/gridfm_graphkit/cli.py", line 318, in main_standard
+    run_training(
+    ~~~~~~~~~~~~^
+        args.config,
+        ^^^^^^^^^^^^
+    ...<4 lines>...
+        checkpoint_flag=False,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/cluster/home/dnelischer/Untitled/gridfm-graphkit/gridfm_graphkit/cli.py", line 80, in run_training
+    torch.manual_seed(args.seed)
+                      ^^^^^^^^^
+AttributeError: 'NestedNamespace' object has no attribute 'seed'
