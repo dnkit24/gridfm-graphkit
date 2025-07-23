@@ -196,3 +196,132 @@ class MixedLoss(nn.Module):
 
         loss_details["loss"] = total_loss
         return loss_details
+
+################################################################
+############ Addition DN #################
+
+# Add at the bottom of the loss.py file, after the MixedLoss class
+
+class GraphNeuralSolverPBELoss(nn.Module):
+    """
+    Implements power balance equations as a loss function, inspired by 
+    the EquilibriumViolation approach in GraphNeuralSolver.
+    """
+    def __init__(self, visualization=False):
+        super().__init__()
+        self.visualization = visualization
+    
+    def forward(self, pred, target, edge_index, edge_attr, mask=None):
+        """
+        Calculate power balance equations loss.
+        """
+        # Create a temporary copy of pred to avoid modifying it
+        temp_pred = pred.clone()
+
+        # If a value is not masked, then use the original one
+        if mask is not None:
+            unmasked = ~mask
+            temp_pred[unmasked] = target[unmasked]
+        
+        # Extract voltage magnitudes and angles
+        vm = temp_pred[:, VM]
+        va = temp_pred[:, VA]
+        pg = temp_pred[:, PG]
+        qg = temp_pred[:, QG]
+        pd = temp_pred[:, PD]
+        qd = temp_pred[:, QD]
+        
+        # Extract grid parameters from edge attributes
+        g_real = edge_attr[:, G]  # Conductance
+        b_imag = edge_attr[:, B]  # Susceptance
+        
+        # Get source and destination nodes for each edge
+        src, dst = edge_index
+        
+        # Calculate power injections using AC power flow equations
+        p_calc = torch.zeros_like(vm).to(vm.device)
+        q_calc = torch.zeros_like(vm).to(vm.device)
+        
+        # For each edge, calculate power flow contribution
+        for i in range(edge_index.shape[1]):
+            from_idx = src[i]
+            to_idx = dst[i]
+            g = g_real[i]
+            b = b_imag[i]
+            
+            # Voltage magnitudes at both ends
+            v_from = vm[from_idx]
+            v_to = vm[to_idx]
+            
+            # Voltage angle difference
+            angle_diff = va[from_idx] - va[to_idx]
+            
+            # Calculate active and reactive power flow contributions
+            p_flow = v_from * v_to * (g * torch.cos(angle_diff) + b * torch.sin(angle_diff))
+            q_flow = v_from * v_to * (g * torch.sin(angle_diff) - b * torch.cos(angle_diff))
+            
+            # Accumulate power injections
+            p_calc[from_idx] += p_flow
+            q_calc[from_idx] += q_flow
+        
+        # Calculate power imbalances
+        p_imbalance = pg - pd - p_calc
+        q_imbalance = qg - qd - q_calc
+        
+        # Compute loss as the mean squared error of the imbalances
+        p_loss = torch.mean(p_imbalance**2)
+        q_loss = torch.mean(q_imbalance**2)
+        loss = p_loss + q_loss
+        
+        if self.visualization:
+            return {
+                "loss": loss,
+                "GNS PBE loss": loss.item(),
+                "GNS Active Power Loss": p_loss.item(),
+                "GNS Reactive Power Loss": q_loss.item(),
+                "Nodal Active Power Imbalance": torch.abs(p_imbalance),
+                "Nodal Reactive Power Imbalance": torch.abs(q_imbalance),
+            }
+        else:
+            return {
+                "loss": loss,
+                "GNS PBE loss": loss.item(),
+                "GNS Active Power Loss": p_loss.item(),
+                "GNS Reactive Power Loss": q_loss.item(),
+            }
+
+
+class PhysicsInformedLoss(nn.Module):
+    """
+    Combined loss function incorporating both MSE and physics-based terms.
+    Inspired by GraphNeuralSolver's approach.
+    """
+    def __init__(self, mse_weight=0.5, pbe_weight=0.5):
+        super().__init__()
+        self.mse_weight = mse_weight
+        self.pbe_weight = pbe_weight
+        self.pbe_loss = GraphNeuralSolverPBELoss()
+        self.mse_loss = MaskedMSELoss()  # Using MaskedMSELoss instead of MSELoss
+    
+    def forward(self, pred, target, edge_index, edge_attr, mask=None):
+        """
+        Calculate the combined loss.
+        """
+        # MSE loss on masked predictions vs targets
+        mse_output = self.mse_loss(pred, target, edge_index, edge_attr, mask)
+        mse_loss = mse_output["loss"]
+        
+        # Physics-based loss
+        pbe_output = self.pbe_loss(pred, target, edge_index, edge_attr, mask)
+        physics_loss = pbe_output["loss"]
+        
+        # Combine losses
+        total_loss = self.mse_weight * mse_loss + self.pbe_weight * physics_loss
+        
+        # Return combined output dictionary
+        return {
+            "loss": total_loss,  # Primary loss key used by trainer
+            "MSE loss": mse_loss.item(),  # Consistent with other loss names
+            "GNS PBE loss": physics_loss.item(),
+            **{k: v for k, v in pbe_output.items() if k not in ["loss", "GNS PBE loss"]},
+        }

@@ -16,6 +16,8 @@ from gridfm_graphkit.utils.loss import (
     SCELoss,
     MixedLoss,
     MSELoss,
+    PhysicsInformedLoss,
+    GraphNeuralSolverPBELoss,
 )
 from gridfm_graphkit.models.graphTransformer import GNN_TransformerConv
 from gridfm_graphkit.models.gps_transformer import GPSTransformer
@@ -188,19 +190,9 @@ def load_normalizer(args):
     else:
         raise ValueError(f"Unknown normalization method: {method}")
 
-
 def get_loss_function(args):
     """
     Load the appropriate loss function
-
-    Args:
-        args (NestedNamespace): contains configs.
-
-    Returns:
-        nn.Module: Loss function
-
-    Raises:
-        ValueError: If an unknown loss function is specified.
     """
     loss_functions = []
     for loss_name in args.training.losses:
@@ -212,6 +204,13 @@ def get_loss_function(args):
             loss_functions.append(SCELoss())
         elif loss_name == "PBE":
             loss_functions.append(PBELoss())
+        elif loss_name == "GNSPBE":  # Add this case
+            loss_functions.append(GraphNeuralSolverPBELoss())
+        elif loss_name == "Physics":  # Add this case
+            loss_functions.append(PhysicsInformedLoss(
+                mse_weight=args.training.mse_weight if hasattr(args.training, 'mse_weight') else 0.5,
+                pbe_weight=args.training.pbe_weight if hasattr(args.training, 'pbe_weight') else 0.5
+            ))
         else:
             raise ValueError(f"Unknown loss function: {loss_name}")
 
